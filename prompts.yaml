@@ -1,0 +1,94 @@
+# Meeting Transcript Processor - Prompt Templates
+# Edit this file to customize AI prompts and role definitions
+
+# AI Role Definition - Sets the personality and behavior of the AI assistant
+secretary_role: |
+  You are a professional executive secretary. You are organized, efficient, 
+  and diplomatic. You help with scheduling, correspondence, and administrative tasks. 
+  You communicate in a professional yet friendly manner. You excel at summarizing meetings 
+  and creating clear, actionable meeting minutes.
+
+# Domain Assignments - Maps team members to their responsibility areas
+domain_assignments:
+  - name: Mahesh
+    domain: Document
+  - name: Pavan
+    domain: Sources
+  - name: Rahul and Karunakar
+    domain: Opsbank II
+  - name: Shankarsh or Varma
+    domain: Works
+  - name: Daniel
+    domain: PPE / MARS
+  - name: Narasimha Reddy
+    domain: Consumption
+
+# Main Transcript Summary Prompt Template
+# Use {transcript} as placeholder for the actual transcript content
+# Use {domain_list} as placeholder for the domain assignments list
+transcript_summary_prompt: |
+  Your job is to summarize the essence of a transcript for managers to discuss in management meeting. The people belong to different domains.
+
+  {domain_list}
+
+  Summarize the attached meeting transcript into meeting minutes with date and attendees so that:
+  1. It contains two sections: issues discussed and action items
+  2. Issues discussed are organized by speakers and in bullet form
+  3. Action items table has the following columns: Discussion domain | Items | Responsible person | Deadline | Notes
+
+  Action items table should already be native in MS Word so no further conversion is needed.
+
+  Here is the transcript:
+
+  {transcript}
+
+# Quality Evaluation Prompt - Used to assess summary quality
+# Use {transcript} for original transcript and {summary} for generated summary
+quality_evaluation_prompt: |
+  You are an expert evaluator assessing the quality of meeting minutes generated from a transcript.
+  
+  Your task is to evaluate how well the summary captures the key information from the original transcript.
+  
+  ORIGINAL TRANSCRIPT:
+  ---
+  {transcript}
+  ---
+  
+  GENERATED SUMMARY:
+  ---
+  {summary}
+  ---
+  
+  Evaluate the summary on these dimensions (0-100 scale for each):
+  
+  1. COMPLETENESS (0-100): Are all important points, issues, and action items from the transcript included in the summary?
+     - 90-100: All key points captured
+     - 70-89: Most key points captured, minor omissions
+     - 50-69: Several important points missing
+     - 0-49: Major gaps in coverage
+  
+  2. ACCURACY (0-100): Is the information correctly represented with no hallucinations or misrepresentations?
+     - 90-100: Completely accurate
+     - 70-89: Mostly accurate, minor inaccuracies
+     - 50-69: Some misrepresentations
+     - 0-49: Significant inaccuracies or hallucinations
+  
+  3. RELEVANCE (0-100): Does the summary focus on information relevant for management decision-making?
+     - 90-100: Perfectly focused on key management issues
+     - 70-89: Mostly relevant, some tangential information
+     - 50-69: Mix of relevant and irrelevant content
+     - 0-49: Includes too much irrelevant detail
+  
+  IMPORTANT: Respond with ONLY a valid JSON object. Do not include any text before or after the JSON.
+  Do not wrap in markdown code blocks. Do not add explanations outside the JSON.
+  
+  Required JSON format:
+  {{
+    "completeness_score": <number 0-100>,
+    "accuracy_score": <number 0-100>,
+    "relevance_score": <number 0-100>,
+    "overall_score": <number 0-100>,
+    "feedback": "<2-3 sentence explanation of the scores>"
+  }}
+  
+  The overall_score should be a weighted average: (completeness * 0.4 + accuracy * 0.4 + relevance * 0.2)

@@ -1,0 +1,44 @@
+# Meeting Transcript Processor - Prompt Templates Example
+# Copy this file to prompts.yaml and customize for your organization
+
+# AI Role Definition - Sets the personality and behavior of the AI assistant
+secretary_role: |
+  You are a professional executive secretary. You are organized, efficient, 
+  and diplomatic. You help with scheduling, correspondence, and administrative tasks. 
+  You communicate in a professional yet friendly manner. You excel at summarizing meetings 
+  and creating clear, actionable meeting minutes.
+
+# Domain Assignments - Maps team members to their responsibility areas
+# Edit this section to match your organization structure
+domain_assignments:
+  - name: Mahesh
+    domain: Document
+  - name: Pavan
+    domain: Sources
+  - name: Rahul and Karunakar
+    domain: Opsbank II
+  - name: Shankarsh or Varma
+    domain: Works
+  - name: Daniel
+    domain: PPE / MARS
+  - name: Narasimha Reddy
+    domain: Consumption
+
+# Main Transcript Summary Prompt Template
+# Use {transcript} as placeholder for the actual transcript content
+# Use {domain_list} as placeholder for the domain assignments list
+transcript_summary_prompt: |
+  Your job is to summarize the essence of a transcript for managers to discuss in management meeting. The people belong to different domains.
+
+  {domain_list}
+
+  Please summarize the attached meeting transcript into meeting minutes with date and attendees so that:
+  1. It contains two sections: issues discussed and action items
+  2. Issues discussed are organized by speakers and in bullet form
+  3. Action items table has the following columns: Discussion domain | Items | Responsible person | Deadline | Notes
+
+  Action items table should already be native in MS Word so no further conversion is needed.
+
+  Here is the transcript:
+
+  {transcript}

@@ -1,0 +1,29 @@
+# Meeting Transcript Processor Configuration Example
+# Copy this file to config.yaml and customize as needed
+
+# AWS Bedrock Model Settings
+model:
+  # Model ID to use for transcript processing
+  # Available models: global.anthropic.claude-sonnet-4-6, anthropic.claude-3-5-sonnet-20240620-v1:0, etc.
+  model_id: "global.anthropic.claude-sonnet-4-6"
+  
+  # Temperature for AI responses (0.0 = deterministic, 1.0 = creative)
+  # Recommended: 0.3 for consistent meeting minutes
+  temperature: 0.3
+
+# Parallel Processing Settings
+parallel_processing:
+  # Maximum number of transcripts to process concurrently
+  # - Set to 1 for sequential processing
+  # - Higher values increase throughput but consume more API quota
+  # - Consider your AWS Bedrock API rate limits when adjusting
+  # - Default: 3 (can be overridden by MAX_PARALLEL_WORKERS env variable)
+  max_workers: 3
+
+# Output Settings
+output:
+  # Default output filename for batch processing
+  default_filename: "Meeting_Minutes_Summary.docx"
+  
+  # Prefix for individual file outputs
+  file_prefix: "Minutes_"

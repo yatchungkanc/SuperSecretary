@@ -1,0 +1,73 @@
+# Meeting Transcript Processor Configuration
+# Edit this file to customize application behavior
+
+# AWS Bedrock Model Settings
+model:
+  # Model ID to use for transcript processing
+  # Available models: global.anthropic.claude-sonnet-4-6, anthropic.claude-3-5-sonnet-20240620-v1:0, etc.
+  model_id: "global.anthropic.claude-sonnet-4-6"
+  
+  # Temperature for AI responses (0.0 = deterministic, 1.0 = creative)
+  # Recommended: 0.3 for consistent meeting minutes
+  temperature: 0.3
+
+# Parallel Processing Settings
+parallel_processing:
+  # Maximum number of transcripts to process concurrently
+  # - Set to 1 for sequential processing
+  # - Higher values increase throughput but consume more API quota
+  # - Consider your AWS Bedrock API rate limits when adjusting
+  # - Default: 3 (can be overridden by MAX_PARALLEL_WORKERS env variable)
+  max_workers: 3
+
+# Output Settings
+output:
+  # Default output filename for batch processing
+  default_filename: "Meeting_Minutes_Summary.docx"
+  
+  # Prefix for individual file outputs
+  file_prefix: "Minutes_"
+
+# Quality Evaluation Settings
+quality_evaluation:
+  # Enable quality evaluation (measures how well summary matches transcript)
+  enabled: true
+  
+  # Evaluation method: "keyword", "claude", or "both"
+  # - keyword: Fast, free, coverage-based metric
+  # - claude: Slower, small cost, deep AI analysis
+  # - both: Comprehensive evaluation (recommended)
+  method: "both"
+  
+  # Keyword Coverage Settings (always fast and free)
+  keyword:
+    # Minimum acceptable coverage percentage (0-100)
+    min_coverage: 50
+    
+    # Extraction method: "frequency" or "tfidf"
+    # - frequency: Simple word frequency analysis (faster)
+    # - tfidf: TF-IDF weighted keywords (more accurate)
+    extract_method: "frequency"
+    
+    # Number of top keywords to track
+    top_keywords: 30
+  
+  # Claude Evaluation Settings (uses API, adds processing time)
+  claude:
+    # Enable Claude-based evaluation
+    enabled: true
+    
+    # Minimum acceptable scores (0-100)
+    min_overall_score: 70
+    min_completeness: 75
+    min_accuracy: 80
+    min_relevance: 75
+    
+    # For batch processing: evaluate all files or sample
+    batch_mode: "all"  # "all", "sample", or "first"
+    
+    # If batch_mode is "sample", what percentage to evaluate (0.0-1.0)
+    sample_rate: 0.2  # 20% of files
+    
+    # If batch_mode is "first", how many files to evaluate
+    first_n: 3
