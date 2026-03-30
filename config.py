@@ -134,10 +134,25 @@ class Configuration:
             self.claude_eval_enabled = False
     
     def _validate_credentials(self):
-        """Validate that required credentials are present"""
-        if not all([self.aws_access_key_id, self.aws_secret_access_key]):
-            print("Error: Missing required AWS credentials!")
-            print("Please create a .env file with the following variables:")
+        """Validate that required credentials are present and not placeholder values"""
+        _PLACEHOLDERS = ("your_", "_here", "example", "replace_me")
+
+        def _is_placeholder(value: str) -> bool:
+            return any(p in value.lower() for p in _PLACEHOLDERS)
+
+        missing = not all([self.aws_access_key_id, self.aws_secret_access_key])
+        placeholder = not missing and any(
+            _is_placeholder(v)
+            for v in [self.aws_access_key_id, self.aws_secret_access_key]
+        )
+
+        if missing or placeholder:
+            if placeholder:
+                print("Error: AWS credentials still contain placeholder values!")
+                print("Edit your .env file and replace the placeholder values with real credentials.")
+            else:
+                print("Error: Missing required AWS credentials!")
+                print("Please create a .env file with the following variables:")
             print("  AWS_ACCESS_KEY_ID=your_access_key")
             print("  AWS_SECRET_ACCESS_KEY=your_secret_key")
             print("  AWS_SESSION_TOKEN=your_session_token (if using temporary credentials)")

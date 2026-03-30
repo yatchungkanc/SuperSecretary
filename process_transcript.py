@@ -88,7 +88,8 @@ class TranscriptProcessorOrchestrator:
             print(result['summary'])
             
             # Save to individual file
-            output_filename = f"{self.config.output_file_prefix}{result['file_name']}"
+            os.makedirs("output", exist_ok=True)
+            output_filename = os.path.join("output", f"{self.config.output_file_prefix}{result['file_name']}")
             self.writer.execute([result], output_filename)
             
             # Show metrics
@@ -146,6 +147,8 @@ class TranscriptProcessorOrchestrator:
         
         if results:
             # Save combined results
+            os.makedirs("output", exist_ok=True)
+            output_file = os.path.join("output", os.path.basename(output_file))
             self.writer.execute(results, output_file)
             
             # Display preview
@@ -173,8 +176,12 @@ def main():
     print("="*60 + "\n")
     
     # Create orchestrator
-    orchestrator = TranscriptProcessorOrchestrator()
-    
+    try:
+        orchestrator = TranscriptProcessorOrchestrator()
+    except Exception as e:
+        print(f"Error: Failed to initialize processor: {e}")
+        sys.exit(1)
+
     # Determine what to process based on command line arguments
     if len(sys.argv) > 1:
         input_path = sys.argv[1]
