@@ -6,6 +6,7 @@ import os
 import sys
 import yaml
 import boto3
+from botocore.config import Config as BotocoreConfig
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -166,7 +167,12 @@ class Configuration:
             region_name=self.aws_region,
             aws_access_key_id=self.aws_access_key_id,
             aws_secret_access_key=self.aws_secret_access_key,
-            aws_session_token=self.aws_session_token
+            aws_session_token=self.aws_session_token,
+            config=BotocoreConfig(
+                read_timeout=300,
+                connect_timeout=30,
+                retries={"max_attempts": 3, "mode": "adaptive"}
+            )
         )
 
 
