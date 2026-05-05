@@ -44,6 +44,7 @@ Configuration:
 import os
 import sys
 import glob
+from datetime import datetime
 
 from config import Configuration
 from agents import CoordinatorAgent, OutputWriterAgent
@@ -58,8 +59,16 @@ class TranscriptProcessorOrchestrator:
     
     def __init__(self):
         self.config = Configuration()
+        self.config.verify_aws_credentials()
+        print("✓ Credential verification complete. Processing setup started.\n")
         self.coordinator = CoordinatorAgent(self.config)
         self.writer = OutputWriterAgent()
+
+    def _add_generation_date_to_filename(self, filename: str) -> str:
+        """Append the generation date before the file extension."""
+        base_name, extension = os.path.splitext(filename)
+        generation_date = datetime.now().strftime("%Y-%m-%d")
+        return f"{base_name}_{generation_date}{extension}"
     
     def process_single_file(self, file_path: str) -> bool:
         """
@@ -77,10 +86,12 @@ class TranscriptProcessorOrchestrator:
         
         # Initialize metrics for single file
         self.coordinator.metrics_collector.start_batch()
+        print("Progress: 0/1 files complete")
         
         result = self.coordinator.execute(file_path)
         
         if result:
+            print("Progress: 1/1 files complete")
             # Display summary
             print("\n" + "="*60)
             print(f"Summary for: {result['file_name']}")
@@ -89,7 +100,10 @@ class TranscriptProcessorOrchestrator:
             
             # Save to individual file
             os.makedirs("output", exist_ok=True)
-            output_filename = os.path.join("output", f"{self.config.output_file_prefix}{result['file_name']}")
+            output_filename = self._add_generation_date_to_filename(
+                f"{self.config.output_file_prefix}{result['file_name']}"
+            )
+            output_filename = os.path.join("output", output_filename)
             self.writer.execute([result], output_filename)
             
             # Show metrics
@@ -99,6 +113,7 @@ class TranscriptProcessorOrchestrator:
             
             return True
         else:
+            print("Progress: 1/1 files complete")
             print("Failed to process transcript.")
             
             # Show metrics even for failed processing
@@ -141,6 +156,7 @@ class TranscriptProcessorOrchestrator:
             return False
         
         print(f"Found {len(transcript_files)} transcript(s) to process.\n")
+        print(f"Progress: 0/{len(transcript_files)} files complete")
         
         # Process batch
         results = self.coordinator.execute_batch(transcript_files)
@@ -148,7 +164,8 @@ class TranscriptProcessorOrchestrator:
         if results:
             # Save combined results
             os.makedirs("output", exist_ok=True)
-            output_file = os.path.join("output", os.path.basename(output_file))
+            output_file = self._add_generation_date_to_filename(os.path.basename(output_file))
+            output_file = os.path.join("output", output_file)
             self.writer.execute(results, output_file)
             
             # Display preview
@@ -175,13 +192,6 @@ def main():
     print("Meeting Transcript Processor (Agent-based Architecture)")
     print("="*60 + "\n")
     
-    # Create orchestrator
-    try:
-        orchestrator = TranscriptProcessorOrchestrator()
-    except Exception as e:
-        print(f"Error: Failed to initialize processor: {e}")
-        sys.exit(1)
-
     # Determine what to process based on command line arguments
     if len(sys.argv) > 1:
         input_path = sys.argv[1]
@@ -191,6 +201,21 @@ def main():
         print("\nUsage:")
         print("  Process folder:      python process_transcript.py path/to/folder")
         print("  Process single file: python process_transcript.py path/to/file.docx\n")
+
+    if not os.path.isdir(input_path) and not os.path.isfile(input_path):
+        print(f"Error: '{input_path}' is neither a file nor a directory!")
+        print("\nPlease provide:")
+        print("  - A folder path containing .docx transcript files, or")
+        print("  - A path to a single .docx transcript file")
+        sys.exit(1)
+
+    # Create orchestrator after input validation so credential verification happens
+    # immediately before real processing starts.
+    try:
+        orchestrator = TranscriptProcessorOrchestrator()
+    except Exception as e:
+        print(f"Error: Failed to initialize processor: {e}")
+        sys.exit(1)
     
     # Check if input is a directory or a file
     if os.path.isdir(input_path):
@@ -206,10 +231,6 @@ def main():
         sys.exit(0 if success else 1)
             
     else:
-        print(f"Error: '{input_path}' is neither a file nor a directory!")
-        print("\nPlease provide:")
-        print("  - A folder path containing .docx transcript files, or")
-        print("  - A path to a single .docx transcript file")
         sys.exit(1)
 
 

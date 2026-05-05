@@ -189,12 +189,15 @@ class CoordinatorAgent(BaseAgent):
                             results.append(result)
                             with self.print_lock:
                                 print(f"[{completed}/{len(file_paths)}] ✓ Completed: {os.path.basename(file_path)}")
+                                print(f"Progress: {completed}/{len(file_paths)} files complete")
                         else:
                             with self.print_lock:
                                 print(f"[{completed}/{len(file_paths)}] ✗ Failed: {os.path.basename(file_path)}")
+                                print(f"Progress: {completed}/{len(file_paths)} files complete")
                     except Exception as e:
                         with self.print_lock:
                             print(f"[{completed}/{len(file_paths)}] ✗ Error processing {os.path.basename(file_path)}: {str(e)}")
+                            print(f"Progress: {completed}/{len(file_paths)} files complete")
                     
                     with self.print_lock:
                         print()  # Blank line between status updates
@@ -222,10 +225,11 @@ class CoordinatorAgent(BaseAgent):
         print("="*60)
         
         results = []
-        for file_path in file_paths:
+        for index, file_path in enumerate(file_paths, start=1):
             result = self.execute(file_path)
             if result:
                 results.append(result)
+            print(f"Progress: {index}/{len(file_paths)} files complete")
             print()  # Blank line between files
         
         print("="*60)

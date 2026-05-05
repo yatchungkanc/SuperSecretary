@@ -1,6 +1,12 @@
 # Meeting Transcript Processor Configuration
 # Edit this file to customize application behavior
 
+# AWS Credential Renewal Settings
+aws:
+  # Command to run when credentials expire.
+  # Keep this interactive for go-aws-sso so it can open the authorization page.
+  sso_renew_command: "go-aws-sso --persist"
+
 # AWS Bedrock Model Settings
 model:
   # Model ID to use for transcript processing

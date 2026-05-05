@@ -244,7 +244,8 @@ class QualityEvaluator:
             }]
             
             # Call Claude API
-            response = self.client.converse(
+            response, self.client = self.config.converse_with_auto_refresh(
+                self.client,
                 modelId=self.config.model_id,
                 messages=messages,
                 inferenceConfig={"temperature": 0.1}  # Low temperature for consistent eval

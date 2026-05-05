@@ -69,8 +69,8 @@ python process_transcript.py path/to/folder
 python process_transcript.py path/to/transcript.docx
 ```
 
-- Single-file output: `Minutes_<filename>.docx`
-- Batch output: `Meeting_Minutes_Summary.docx` (configurable in `config.yaml`)
+- Single-file output: `Minutes_<filename>_<YYYY-MM-DD>.docx`
+- Batch output: `Meeting_Minutes_Summary_<YYYY-MM-DD>.docx` (base name configurable in `config.yaml`)
 
 ## Configuration
 
@@ -85,6 +85,9 @@ Settings are layered in this precedence order (highest to lowest):
 ### `config.yaml` options
 
 ```yaml
+aws:
+  sso_renew_command: "go-aws-sso --persist"
+
 model:
   model_id: "global.anthropic.claude-sonnet-4-6"
   temperature: 0.3          # 0.0 = deterministic, 1.0 = creative
@@ -96,6 +99,8 @@ output:
   default_filename: "Meeting_Minutes_Summary.docx"
   file_prefix: "Minutes_"
 ```
+
+`aws.sso_renew_command` is the command run when AWS credentials are expired. The default uses the interactive `go-aws-sso` flow so the browser authorization page can open.
 
 Optional environment variable overrides (see `.env.example`):
 

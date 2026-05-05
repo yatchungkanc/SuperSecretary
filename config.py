@@ -3,12 +3,19 @@ Configuration and prompt management for the Meeting Transcript Processor.
 """
 
 import os
+import shlex
+import subprocess
 import sys
+import threading
 import yaml
 import boto3
 from botocore.config import Config as BotocoreConfig
+from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
 from pathlib import Path
+
+
+_AWS_CREDENTIAL_REFRESH_LOCK = threading.Lock()
 
 
 class Configuration:
@@ -22,10 +29,8 @@ class Configuration:
         self._load_config_file(config_file)
         
         # AWS Credentials (from environment variables only - never in config file)
-        self.aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
-        self.aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
-        self.aws_session_token = os.getenv("AWS_SESSION_TOKEN")
-        self.aws_region = os.getenv("AWS_REGION", "us-east-1")
+        self._load_aws_credentials()
+        self._credential_refresh_count = 0
         
         # Validate credentials
         self._validate_credentials()
@@ -36,6 +41,9 @@ class Configuration:
         
         # Default configuration (fallback if file doesn't exist)
         defaults = {
+            'aws': {
+                'sso_renew_command': 'go-aws-sso --persist'
+            },
             'model': {
                 'model_id': 'global.anthropic.claude-sonnet-4-6',
                 'temperature': 0.3
@@ -80,6 +88,10 @@ class Configuration:
         # Model settings (environment variables can override config file)
         self.model_id = os.getenv("MODEL_ID", config['model']['model_id'])
         self.temperature = float(os.getenv("TEMPERATURE", config['model']['temperature']))
+        self.sso_renew_command = config.get('aws', {}).get(
+            'sso_renew_command',
+            defaults['aws']['sso_renew_command']
+        )
         
         # Parallel processing settings (environment variable overrides config file)
         self.max_parallel_workers = int(
@@ -134,6 +146,13 @@ class Configuration:
             self.keyword_top_n = 30
             self.claude_eval_enabled = False
     
+    def _load_aws_credentials(self):
+        """Load AWS credentials from the current environment."""
+        self.aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+        self.aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+        self.aws_session_token = os.getenv("AWS_SESSION_TOKEN")
+        self.aws_region = os.getenv("AWS_REGION", "us-east-1")
+
     def _validate_credentials(self):
         """Validate that required credentials are present and not placeholder values"""
         _PLACEHOLDERS = ("your_", "_here", "example", "replace_me")
@@ -159,20 +178,178 @@ class Configuration:
             print("  AWS_SESSION_TOKEN=your_session_token (if using temporary credentials)")
             print("  AWS_REGION=us-east-1 (optional, defaults to us-east-1)")
             sys.exit(1)
+
+    def _get_go_aws_sso_command(self):
+        """Return the interactive go-aws-sso renewal command."""
+        if isinstance(self.sso_renew_command, list):
+            command = [str(part) for part in self.sso_renew_command]
+        else:
+            command = shlex.split(str(self.sso_renew_command))
+
+        if not command:
+            command = shlex.split("go-aws-sso --persist")
+
+        aws_profile = os.getenv("AWS_PROFILE")
+        if aws_profile and "--profile" not in command and "-p" not in command:
+            command.extend(["--profile", aws_profile])
+        return command
+
+    def _load_credentials_from_aws_profile(self):
+        """Load persisted AWS credentials from the selected shared credentials profile."""
+        profile_name = os.getenv("AWS_PROFILE") or "default"
+        session = boto3.Session(profile_name=profile_name)
+        credentials = session.get_credentials()
+
+        if credentials is None:
+            return False
+
+        frozen_credentials = credentials.get_frozen_credentials()
+        self.aws_access_key_id = frozen_credentials.access_key
+        self.aws_secret_access_key = frozen_credentials.secret_key
+        self.aws_session_token = frozen_credentials.token
+        self.aws_region = (
+            os.getenv("AWS_REGION")
+            or os.getenv("AWS_DEFAULT_REGION")
+            or session.region_name
+            or self.aws_region
+            or "us-east-1"
+        )
+        return True
+
+    def refresh_aws_credentials(self, refresh_count_at_error: int = None):
+        """
+        Renew AWS SSO credentials and reload this configuration's credential values.
+
+        The default flow uses interactive go-aws-sso authorization, because
+        `go-aws-sso refresh` cannot recover when the cached SSO session itself
+        is invalid. Override `aws.sso_renew_command` in config.yaml if your local
+        flow differs.
+        """
+        with _AWS_CREDENTIAL_REFRESH_LOCK:
+            if (
+                refresh_count_at_error is not None
+                and self._credential_refresh_count > refresh_count_at_error
+            ):
+                return
+
+            command = self._get_go_aws_sso_command()
+            print(f"Refreshing AWS credentials with: {' '.join(command)}")
+            subprocess.run(command, check=True)
+
+            # go-aws-sso normally writes ~/.aws/credentials; reloading .env first
+            # also supports teams that sync fresh credentials there.
+            load_dotenv(override=True)
+            self._load_aws_credentials()
+
+            try:
+                self._load_credentials_from_aws_profile()
+            except (BotoCoreError, ClientError, OSError) as e:
+                print(f"Warning: Could not load AWS profile credentials after refresh: {e}")
+
+            self._validate_credentials()
+            self._credential_refresh_count += 1
+
+    def verify_aws_credentials(self):
+        """Verify current AWS credentials, renewing once if they are expired."""
+        try:
+            identity = self._create_aws_client("sts").get_caller_identity()
+        except Exception as e:
+            if not self.is_expired_credentials_error(e):
+                raise
+
+            print("AWS credentials appear to be expired. Launching go-aws-sso to renew them...")
+            self.refresh_aws_credentials(self._credential_refresh_count)
+            identity = self._create_aws_client("sts").get_caller_identity()
+
+        account = identity.get("Account", "unknown")
+        arn = identity.get("Arn", "unknown")
+        print(f"✓ AWS credentials verified for account {account}")
+        print(f"  Identity: {arn}")
+        return identity
+
+    @staticmethod
+    def is_expired_credentials_error(error: Exception) -> bool:
+        """Return True when an AWS error indicates expired temporary credentials."""
+        expired_codes = {
+            "ExpiredToken",
+            "ExpiredTokenException",
+            "RequestExpired",
+        }
+        possible_expired_codes = {"UnauthorizedException", "UnrecognizedClientException"}
+        expired_markers = (
+            "expired token",
+            "token has expired",
+            "security token included in the request is expired",
+            "the security token included in the request is expired",
+            "expired credentials",
+            "credentials have expired",
+        )
+
+        current = error
+        seen = set()
+        while current and id(current) not in seen:
+            seen.add(id(current))
+
+            if isinstance(current, ClientError):
+                aws_error = current.response.get("Error", {})
+                code = aws_error.get("Code", "")
+                message = aws_error.get("Message", "")
+                if code in expired_codes:
+                    return True
+                if code in possible_expired_codes and any(
+                    marker in message.lower() for marker in expired_markers
+                ):
+                    return True
+
+            text = str(current).lower()
+            if any(marker in text for marker in expired_markers):
+                return True
+
+            current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+        return False
+
+    def converse_with_auto_refresh(self, client, **kwargs):
+        """Call Bedrock Converse, renewing expired SSO credentials once if needed."""
+        client_refresh_count = getattr(
+            client,
+            "_secretary_credential_refresh_count",
+            self._credential_refresh_count,
+        )
+        try:
+            return client.converse(**kwargs), client
+        except Exception as e:
+            if not self.is_expired_credentials_error(e):
+                raise
+
+            if client_refresh_count >= self._credential_refresh_count:
+                print("AWS credentials appear to be expired. Launching go-aws-sso to renew them...")
+                self.refresh_aws_credentials(client_refresh_count)
+            refreshed_client = self.create_bedrock_client()
+            return refreshed_client.converse(**kwargs), refreshed_client
     
     def create_bedrock_client(self):
         """Create and return AWS Bedrock client"""
-        return boto3.client(
+        client = self._create_aws_client(
             "bedrock-runtime",
-            region_name=self.aws_region,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-            aws_session_token=self.aws_session_token,
             config=BotocoreConfig(
                 read_timeout=300,
                 connect_timeout=30,
                 retries={"max_attempts": 3, "mode": "adaptive"}
             )
+        )
+        client._secretary_credential_refresh_count = self._credential_refresh_count
+        return client
+
+    def _create_aws_client(self, service_name: str, **kwargs):
+        """Create an AWS client using this configuration's current credentials."""
+        return boto3.client(
+            service_name,
+            region_name=self.aws_region,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            aws_session_token=self.aws_session_token,
+            **kwargs
         )
 
 
