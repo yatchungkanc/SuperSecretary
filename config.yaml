@@ -3,6 +3,12 @@
 
 # AWS Credential Renewal Settings
 aws:
+  # AWS region used for STS and Bedrock calls.
+  region: "us-east-1"
+
+  # Optional shared AWS credentials profile. Leave empty to use the default profile.
+  profile:
+
   # Command to run when credentials expire.
   # Keep this interactive for go-aws-sso so it can open the authorization page.
   sso_renew_command: "go-aws-sso --persist"

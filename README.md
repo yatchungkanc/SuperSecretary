@@ -29,7 +29,9 @@ pip install -r requirements.txt
 
 ### 3. Configure AWS credentials
 
-Copy `.env.example` to `.env` and fill in your credentials:
+Recommended: use `go-aws-sso` or another AWS profile flow that writes credentials to `~/.aws/credentials`. In that case, `.env` is optional and can be omitted.
+
+If you prefer `.env` credentials, copy `.env.example` to `.env` and fill in your credentials:
 
 ```bash
 cp .env.example .env
@@ -86,6 +88,8 @@ Settings are layered in this precedence order (highest to lowest):
 
 ```yaml
 aws:
+  region: "us-east-1"
+  profile:
   sso_renew_command: "go-aws-sso --persist"
 
 model:
@@ -100,7 +104,7 @@ output:
   file_prefix: "Minutes_"
 ```
 
-`aws.sso_renew_command` is the command run when AWS credentials are expired. The default uses the interactive `go-aws-sso` flow so the browser authorization page can open.
+`aws.profile` selects the shared AWS credentials profile. Leave it empty to use `default`. `aws.sso_renew_command` is the command run when AWS credentials are expired. The default uses the interactive `go-aws-sso` flow so the browser authorization page can open.
 
 Optional environment variable overrides (see `.env.example`):
 

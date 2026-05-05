@@ -10,7 +10,7 @@ import threading
 import yaml
 import boto3
 from botocore.config import Config as BotocoreConfig
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -32,8 +32,9 @@ class Configuration:
         self._load_aws_credentials()
         self._credential_refresh_count = 0
         
-        # Validate credentials
-        self._validate_credentials()
+        # Validate credential shape. Missing values are allowed here because
+        # verify_aws_credentials can launch the configured SSO flow.
+        self._validate_credentials(allow_missing=True)
     
     def _load_config_file(self, config_file: str):
         """Load configuration from YAML file with fallback to defaults"""
@@ -42,6 +43,8 @@ class Configuration:
         # Default configuration (fallback if file doesn't exist)
         defaults = {
             'aws': {
+                'region': 'us-east-1',
+                'profile': None,
                 'sso_renew_command': 'go-aws-sso --persist'
             },
             'model': {
@@ -92,6 +95,11 @@ class Configuration:
             'sso_renew_command',
             defaults['aws']['sso_renew_command']
         )
+        self.aws_region = os.getenv(
+            "AWS_REGION",
+            config.get('aws', {}).get('region', defaults['aws']['region'])
+        )
+        self.aws_profile = os.getenv("AWS_PROFILE", config.get('aws', {}).get('profile'))
         
         # Parallel processing settings (environment variable overrides config file)
         self.max_parallel_workers = int(
@@ -151,32 +159,48 @@ class Configuration:
         self.aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID")
         self.aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY")
         self.aws_session_token = os.getenv("AWS_SESSION_TOKEN")
-        self.aws_region = os.getenv("AWS_REGION", "us-east-1")
+        self.aws_region = os.getenv("AWS_REGION", self.aws_region)
 
-    def _validate_credentials(self):
-        """Validate that required credentials are present and not placeholder values"""
-        _PLACEHOLDERS = ("your_", "_here", "example", "replace_me")
+        if self._credentials_missing() or self._credentials_placeholder():
+            try:
+                self._load_credentials_from_aws_profile()
+            except (BotoCoreError, ClientError, OSError) as e:
+                print(f"Warning: Could not load AWS profile credentials: {e}")
 
-        def _is_placeholder(value: str) -> bool:
-            return any(p in value.lower() for p in _PLACEHOLDERS)
+    def _credentials_missing(self) -> bool:
+        """Return True if required AWS credential values are absent."""
+        return not all([self.aws_access_key_id, self.aws_secret_access_key])
 
-        missing = not all([self.aws_access_key_id, self.aws_secret_access_key])
-        placeholder = not missing and any(
-            _is_placeholder(v)
-            for v in [self.aws_access_key_id, self.aws_secret_access_key]
+    def _credentials_placeholder(self) -> bool:
+        """Return True if AWS credential values are still template placeholders."""
+        if self._credentials_missing():
+            return False
+
+        placeholders = ("your_", "_here", "example", "replace_me")
+        return any(
+            any(placeholder in value.lower() for placeholder in placeholders)
+            for value in [self.aws_access_key_id, self.aws_secret_access_key]
         )
+
+    def _validate_credentials(self, allow_missing: bool = False):
+        """Validate that required credentials are present and not placeholder values"""
+        missing = self._credentials_missing()
+        placeholder = self._credentials_placeholder()
+
+        if missing and allow_missing:
+            return
 
         if missing or placeholder:
             if placeholder:
                 print("Error: AWS credentials still contain placeholder values!")
-                print("Edit your .env file and replace the placeholder values with real credentials.")
+                print("Edit or remove your .env file, or use a valid AWS profile.")
             else:
                 print("Error: Missing required AWS credentials!")
-                print("Please create a .env file with the following variables:")
-            print("  AWS_ACCESS_KEY_ID=your_access_key")
-            print("  AWS_SECRET_ACCESS_KEY=your_secret_key")
-            print("  AWS_SESSION_TOKEN=your_session_token (if using temporary credentials)")
-            print("  AWS_REGION=us-east-1 (optional, defaults to us-east-1)")
+                print("Run go-aws-sso, configure an AWS profile, or create a .env file with:")
+            print("  AWS_ACCESS_KEY_ID=your_access_key (if using .env)")
+            print("  AWS_SECRET_ACCESS_KEY=your_secret_key (if using .env)")
+            print("  AWS_SESSION_TOKEN=your_session_token (if using temporary .env credentials)")
+            print("  AWS_REGION=us-east-1 (optional; can also be set in config.yaml)")
             sys.exit(1)
 
     def _get_go_aws_sso_command(self):
@@ -189,14 +213,24 @@ class Configuration:
         if not command:
             command = shlex.split("go-aws-sso --persist")
 
-        aws_profile = os.getenv("AWS_PROFILE")
+        aws_profile = os.getenv("AWS_PROFILE") or self.aws_profile
         if aws_profile and "--profile" not in command and "-p" not in command:
             command.extend(["--profile", aws_profile])
         return command
 
+    def _profile_from_sso_command(self):
+        """Extract --profile/-p from the configured SSO command, if present."""
+        command = self._get_go_aws_sso_command()
+        for index, part in enumerate(command):
+            if part in {"--profile", "-p"} and index + 1 < len(command):
+                return command[index + 1]
+            if part.startswith("--profile="):
+                return part.split("=", 1)[1]
+        return None
+
     def _load_credentials_from_aws_profile(self):
         """Load persisted AWS credentials from the selected shared credentials profile."""
-        profile_name = os.getenv("AWS_PROFILE") or "default"
+        profile_name = self.aws_profile or self._profile_from_sso_command() or "default"
         session = boto3.Session(profile_name=profile_name)
         credentials = session.get_credentials()
 
@@ -210,8 +244,8 @@ class Configuration:
         self.aws_region = (
             os.getenv("AWS_REGION")
             or os.getenv("AWS_DEFAULT_REGION")
-            or session.region_name
             or self.aws_region
+            or session.region_name
             or "us-east-1"
         )
         return True
@@ -254,10 +288,14 @@ class Configuration:
         try:
             identity = self._create_aws_client("sts").get_caller_identity()
         except Exception as e:
-            if not self.is_expired_credentials_error(e):
+            missing = self._credentials_missing() or isinstance(e, NoCredentialsError)
+            if not missing and not self.is_expired_credentials_error(e):
                 raise
 
-            print("AWS credentials appear to be expired. Launching go-aws-sso to renew them...")
+            if missing:
+                print("AWS credentials are missing. Launching go-aws-sso to obtain them...")
+            else:
+                print("AWS credentials appear to be expired. Launching go-aws-sso to renew them...")
             self.refresh_aws_credentials(self._credential_refresh_count)
             identity = self._create_aws_client("sts").get_caller_identity()
 
