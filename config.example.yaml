@@ -39,3 +39,48 @@ output:
   
   # Prefix for individual file outputs
   file_prefix: "Minutes_"
+
+# Quality Evaluation Settings
+quality_evaluation:
+  # Enable quality evaluation (measures how well summary matches transcript)
+  enabled: true
+
+  # Evaluation method: "keyword", "claude", or "both"
+  # - keyword: Fast, free, coverage-based metric
+  # - claude: Slower, small cost, deep AI analysis
+  # - both: Comprehensive evaluation
+  method: "both"
+
+  # Keyword Coverage Settings (always fast and free)
+  keyword:
+    # Minimum acceptable coverage percentage (0-100)
+    min_coverage: 50
+
+    # Extraction method: "frequency" or "tfidf"
+    # - frequency: Simple word frequency analysis (faster)
+    # - tfidf: TF-IDF weighted keywords (more accurate)
+    extract_method: "frequency"
+
+    # Number of top keywords to track
+    top_keywords: 30
+
+  # Claude Evaluation Settings (uses API, adds processing time)
+  claude:
+    # Enable Claude-based evaluation
+    enabled: true
+
+    # Minimum acceptable scores (0-100)
+    min_overall_score: 70
+    min_completeness: 75
+    min_accuracy: 80
+    min_relevance: 75
+
+    # For batch processing: evaluate all files or sample
+    # Options: "all", "sample", or "first"
+    batch_mode: "all"
+
+    # If batch_mode is "sample", what percentage to evaluate (0.0-1.0)
+    sample_rate: 0.2
+
+    # If batch_mode is "first", how many files to evaluate
+    first_n: 3

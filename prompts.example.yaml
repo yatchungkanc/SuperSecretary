@@ -42,3 +42,38 @@ transcript_summary_prompt: |
   Here is the transcript:
 
   {transcript}
+
+# Quality Evaluation Prompt Template
+# Use {transcript} as placeholder for the original transcript content
+# Use {summary} as placeholder for the generated meeting minutes
+# Literal JSON braces must be doubled because Python str.format renders this template.
+quality_evaluation_prompt: |
+  You are an expert evaluator assessing the quality of meeting minutes.
+
+  Evaluate how well the summary captures key information from the original transcript.
+
+  ORIGINAL TRANSCRIPT:
+  ---
+  {transcript}
+  ---
+
+  GENERATED SUMMARY:
+  ---
+  {summary}
+  ---
+
+  Rate on a 0-100 scale:
+  1. COMPLETENESS: Are all important points included?
+  2. ACCURACY: Any misrepresentations or hallucinations?
+  3. RELEVANCE: Focus on management-relevant information?
+
+  Respond in JSON format:
+  {{
+    "completeness_score": <0-100>,
+    "accuracy_score": <0-100>,
+    "relevance_score": <0-100>,
+    "overall_score": <0-100>,
+    "feedback": "<2-3 sentence explanation>"
+  }}
+
+  Overall score = (completeness * 0.4 + accuracy * 0.4 + relevance * 0.2)

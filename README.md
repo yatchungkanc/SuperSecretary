@@ -1,6 +1,6 @@
 # Meeting Transcript Processor
 
-An agent-based Python application that converts meeting transcripts (`.docx`) into structured meeting minutes using AWS Bedrock Claude. Supports single-file and batch folder processing with parallel execution and optional quality evaluation.
+An agent-based Python application that converts meeting transcripts (`.docx`) into structured meeting minutes using AWS Bedrock Claude. It supports single-file and batch folder processing, parallel execution, optional AWS SSO credential renewal, and summary quality evaluation.
 
 ## Requirements
 
@@ -24,12 +24,13 @@ setup_venv.bat
 ### 2. Install dependencies
 
 ```bash
+source venv/bin/activate  # macOS/Linux, when using setup_venv.sh with venv
 pip install -r requirements.txt
 ```
 
 ### 3. Configure AWS credentials
 
-Recommended: use `go-aws-sso` or another AWS profile flow that writes credentials to `~/.aws/credentials`. In that case, `.env` is optional and can be omitted.
+Recommended: use `go-aws-sso` or another AWS profile flow that writes credentials to `~/.aws/credentials`. In that case, `.env` is optional and can be omitted. The app verifies credentials with STS when processing starts and can run the configured SSO renewal command if credentials are missing or expired.
 
 If you prefer `.env` credentials, copy `.env.example` to `.env` and fill in your credentials:
 
@@ -46,17 +47,21 @@ AWS_REGION=us-east-1                        # Optional, defaults to us-east-1
 
 > **Never commit `.env` to version control.**
 
-### 4. (Optional) Customize application settings
+### 4. Customize application settings
 
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-### 5. (Optional) Customize AI prompts and domain assignments
+`config.yaml` is included in this repository as a working local config. If you are setting up a fresh copy or resetting local values, copy from `config.example.yaml`.
+
+### 5. Customize AI prompts and domain assignments
 
 ```bash
 cp prompts.example.yaml prompts.yaml
 ```
+
+`prompts.yaml` is also included as a working prompt file. Edit it to match your organization, domains, and meeting-minute style.
 
 ## Usage
 
@@ -71,8 +76,12 @@ python process_transcript.py path/to/folder
 python process_transcript.py path/to/transcript.docx
 ```
 
-- Single-file output: `Minutes_<filename>_<YYYY-MM-DD>.docx`
-- Batch output: `Meeting_Minutes_Summary_<YYYY-MM-DD>.docx` (base name configurable in `config.yaml`)
+Outputs are written to the `output/` folder:
+
+- Single-file output: `output/Minutes_<transcript-name>_<YYYY-MM-DD>.docx`
+- Batch output: `output/Meeting_Minutes_Summary_<YYYY-MM-DD>.docx` by default
+
+The batch base name and single-file prefix are configurable in `config.yaml`.
 
 ## Configuration
 
@@ -83,6 +92,8 @@ Settings are layered in this precedence order (highest to lowest):
 | 1 | Environment variables | Useful for CI/CD overrides |
 | 2 | `config.yaml` | Primary application settings |
 | 3 | In-code defaults | Fallback when YAML is absent |
+
+AWS credentials are loaded from environment variables first, then from the selected shared AWS credentials profile. The app never reads AWS secrets from `config.yaml`.
 
 ### `config.yaml` options
 
@@ -102,14 +113,33 @@ parallel_processing:
 output:
   default_filename: "Meeting_Minutes_Summary.docx"
   file_prefix: "Minutes_"
+
+quality_evaluation:
+  enabled: true
+  method: "both"          # "keyword", "claude", or "both"
+  keyword:
+    min_coverage: 50
+    extract_method: "frequency"
+    top_keywords: 30
+  claude:
+    enabled: true
+    min_overall_score: 70
+    min_completeness: 75
+    min_accuracy: 80
+    min_relevance: 75
+    batch_mode: "all"    # "all", "sample", or "first"
+    sample_rate: 0.2
+    first_n: 3
 ```
 
-`aws.profile` selects the shared AWS credentials profile. Leave it empty to use `default`. `aws.sso_renew_command` is the command run when AWS credentials are expired. The default uses the interactive `go-aws-sso` flow so the browser authorization page can open.
+`aws.profile` selects the shared AWS credentials profile. Leave it empty to use `default`. `aws.sso_renew_command` is the command run when AWS credentials are missing or expired. The default uses the interactive `go-aws-sso` flow so the browser authorization page can open. If a profile is set, the app appends it to the SSO command when the command does not already include `--profile` or `-p`.
 
 Optional environment variable overrides (see `.env.example`):
 
 | Variable | Overrides |
 |---|---|
+| `AWS_REGION` | `aws.region` |
+| `AWS_PROFILE` | `aws.profile` |
 | `MAX_PARALLEL_WORKERS` | `parallel_processing.max_workers` |
 | `MODEL_ID` | `model.model_id` |
 | `TEMPERATURE` | `model.temperature` |
@@ -122,6 +152,8 @@ Optional environment variable overrides (see `.env.example`):
 | `domain_assignments` | Maps team member names to responsibility domains, injected into the summary prompt |
 | `transcript_summary_prompt` | Main summarization template; use `{transcript}` and `{domain_list}` placeholders |
 | `quality_evaluation_prompt` | Evaluation template; use `{transcript}` and `{summary}` placeholders |
+
+When editing `quality_evaluation_prompt`, double literal JSON braces as `{{` and `}}` because the template is rendered with Python `str.format`.
 
 ## Architecture
 
@@ -151,7 +183,7 @@ All pipeline stages share this dict shape:
 
 ## Quality Evaluation
 
-Two optional evaluation modes (configured in `config.yaml` under `quality_evaluation`):
+Quality evaluation is configured in `config.yaml` under `quality_evaluation`:
 
 | Method | Description |
 |---|---|
@@ -160,6 +192,14 @@ Two optional evaluation modes (configured in `config.yaml` under `quality_evalua
 | `both` | Runs both; composite score weights Claude at 70% and keyword at 30% |
 
 Claude scores are weighted: `overall = (completeness × 0.4) + (accuracy × 0.4) + (relevance × 0.2)`.
+
+For batch processing, `quality_evaluation.claude.batch_mode` controls how often Claude evaluation runs:
+
+| Mode | Behavior |
+|---|---|
+| `all` | Evaluate every processed transcript |
+| `sample` | Evaluate a random percentage set by `sample_rate` |
+| `first` | Evaluate only the first `first_n` processed transcripts |
 
 ## Output metrics
 
@@ -175,8 +215,8 @@ After each run the processor prints a summary including:
 .
 ├── process_transcript.py       # Entry point
 ├── config.py                   # Configuration and prompt management
-├── config.yaml                 # Application settings (git-ignored example provided)
-├── prompts.yaml                # AI prompts and domain assignments
+├── config.yaml                 # Working application settings
+├── prompts.yaml                # Working AI prompts and domain assignments
 ├── requirements.txt            # Python dependencies
 ├── setup_venv.sh               # macOS/Linux venv setup
 ├── setup_venv.bat              # Windows venv setup
@@ -202,3 +242,12 @@ After each run the processor prints a summary including:
 | `python-docx` | Read and write `.docx` files |
 | `python-dotenv` | Load `.env` credentials |
 | `PyYAML` | Parse `config.yaml` and `prompts.yaml` |
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| `transcripts` folder not found | Create `transcripts/` or pass a file/folder path on the command line |
+| Missing or expired AWS credentials | Run `go-aws-sso --persist`, set `AWS_PROFILE`, or fill in `.env` |
+| Bedrock model errors | Confirm the configured model is available in `aws.region` and enabled for your AWS account |
+| Slow batch processing | Lower `parallel_processing.max_workers`, disable Claude quality evaluation, or set `batch_mode` to `sample` or `first` |

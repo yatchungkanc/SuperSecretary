@@ -43,7 +43,7 @@ if %ERRORLEVEL% EQU 0 (
 if "%PYTHON_AVAILABLE%"=="false" (
     echo [X] No Python installation found!
     echo.
-    echo Please install Python 3.7 or higher from:
+    echo Please install Python 3.10 or higher from:
     echo     https://www.python.org/downloads/
     echo.
     echo Make sure to check "Add Python to PATH" during installation.
@@ -120,7 +120,7 @@ echo.
 echo 2. Install dependencies:
 echo      pip install -r requirements.txt
 echo    Or:
-echo      pip install boto3 python-docx python-dotenv
+echo      pip install boto3 python-docx python-dotenv PyYAML
 echo.
 echo 3. Configure AWS credentials in .env file
 echo.
