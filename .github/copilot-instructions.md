@@ -6,7 +6,7 @@
 - Prefer small, focused changes that preserve current console logging patterns (`self.log(...)`).
 
 ## Architecture
-- Entry point: `process_transcript.py` orchestrates single-file and folder processing.
+- Entry point: `super_secretary.py` orchestrates single-file and folder processing.
 - Core coordination: `CoordinatorAgent` in `agents/coordinator_agent.py` controls the pipeline and parallel execution.
 - Pipeline stages:
   - `DocumentReaderAgent`: reads `.docx` transcript content.
@@ -19,9 +19,9 @@
 - Environment setup (macOS/Linux): `bash setup_venv.sh`
 - Environment setup (Windows): `setup_venv.bat`
 - Install dependencies: `pip install -r requirements.txt`
-- Run processor (default `transcripts/`): `python process_transcript.py`
-- Run on folder: `python process_transcript.py path/to/folder`
-- Run on file: `python process_transcript.py path/to/file.docx`
+- Run processor (default `transcripts/`): `python super_secretary.py`
+- Run on folder: `python super_secretary.py path/to/folder`
+- Run on file: `python super_secretary.py path/to/file.docx`
 - Quick syntax validation (no test suite present): `python -m compileall .`
 
 ## Conventions

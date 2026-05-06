@@ -25,5 +25,5 @@ applyTo: "**/*.py"
   - Avoid introducing shared mutable state across workers without synchronization.
 
 - Prefer focused, minimal diffs:
-  - Keep public behavior and CLI usage in `process_transcript.py` stable unless change is explicitly requested.
+  - Keep public behavior and CLI usage in `super_secretary.py` stable unless change is explicitly requested.
   - Add brief type hints and concise docstrings for new public methods.

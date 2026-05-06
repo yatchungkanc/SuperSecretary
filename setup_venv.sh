@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # setup_venv.sh
-# Interactive script to create a virtual environment for the Meeting Transcript Processor
+# Interactive script to create a virtual environment for Super Secretary
 # Detects available tools and guides user through setup
 
 set -e  # Exit on error
 
 echo "=========================================="
 echo "Virtual Environment Setup"
-echo "Meeting Transcript Processor"
+echo "Super Secretary"
 echo "=========================================="
 echo ""
 
@@ -20,7 +20,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Project configuration
-PROJECT_NAME="transcript-processor"
+PROJECT_NAME="super-secretary"
 PYTHON_VERSION="3.10.0"
 
 # Detect available tools
@@ -228,9 +228,11 @@ echo -e "   ${BLUE}pip install -r requirements.txt${NC}"
 echo "   Or:"
 echo -e "   ${BLUE}pip install boto3 python-docx python-dotenv PyYAML${NC}"
 echo ""
-echo "3. Configure AWS credentials in .env file"
+echo "3. Confirm AWS credential setup:"
+echo "   - Recommended: install/configure go-aws-sso; the app runs it automatically when credentials are missing or expired"
+echo "   - Optional: set AWS_PROFILE or create .env with real AWS credentials"
 echo ""
 echo "4. Run the application:"
-echo -e "   ${BLUE}python process_transcript.py transcripts/${NC}"
+echo -e "   ${BLUE}python super_secretary.py transcripts/${NC}"
 echo ""
 echo "=========================================="

@@ -1,5 +1,5 @@
 """
-Agents package for Meeting Transcript Processor.
+Agents package for Meeting Super Secretary.
 
 This package contains all agent classes organized by responsibility:
 - BaseAgent: Abstract base class for all agents
@@ -29,4 +29,3 @@ __all__ = [
     'TranscriptMetrics',
     'BatchMetrics',
 ]
-

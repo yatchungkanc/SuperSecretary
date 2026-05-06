@@ -1,5 +1,5 @@
 """
-Configuration and prompt management for the Meeting Transcript Processor.
+Configuration and prompt management for the Meeting Super Secretary.
 """
 
 import os

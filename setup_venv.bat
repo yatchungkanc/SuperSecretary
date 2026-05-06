@@ -1,18 +1,18 @@
 @echo off
 REM setup_venv.bat
-REM Interactive script to create a virtual environment for the Meeting Transcript Processor (Windows)
+REM Interactive script to create a virtual environment for Super Secretary (Windows)
 REM Detects available tools and guides user through setup
 
 setlocal enabledelayedexpansion
 
 echo ==========================================
 echo Virtual Environment Setup
-echo Meeting Transcript Processor
+echo Super Secretary
 echo ==========================================
 echo.
 
 REM Project configuration
-set PROJECT_NAME=transcript-processor
+set PROJECT_NAME=super-secretary
 set PYTHON_VERSION=3.10.0
 set VENV_DIR=venv
 
@@ -122,10 +122,12 @@ echo      pip install -r requirements.txt
 echo    Or:
 echo      pip install boto3 python-docx python-dotenv PyYAML
 echo.
-echo 3. Configure AWS credentials in .env file
+echo 3. Confirm AWS credential setup:
+echo    - Recommended: install/configure go-aws-sso; the app runs it automatically when credentials are missing or expired
+echo    - Optional: set AWS_PROFILE or create .env with real AWS credentials
 echo.
 echo 4. Run the application:
-echo      python process_transcript.py transcripts/
+echo      python super_secretary.py transcripts/
 echo.
 echo ==========================================
 echo.

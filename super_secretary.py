@@ -1,5 +1,5 @@
 """
-Main entry point for Meeting Transcript Processor.
+Main entry point for Meeting Super Secretary.
 
 Agent-based architecture for processing meeting transcripts using AWS Bedrock Claude.
 
@@ -21,13 +21,13 @@ Setup:
 
 Usage:
     # Process all files in transcripts folder (default)
-    python process_transcript.py
+    python super_secretary.py
     
     # Process all files in a specific folder
-    python process_transcript.py path/to/folder
+    python super_secretary.py path/to/folder
     
     # Process a single file
-    python process_transcript.py path/to/transcript.docx
+    python super_secretary.py path/to/transcript.docx
 
 Configuration:
     Application settings are managed through three files:
@@ -189,7 +189,7 @@ class TranscriptProcessorOrchestrator:
 
 def main():
     """Main execution function"""
-    print("Meeting Transcript Processor (Agent-based Architecture)")
+    print("Meeting Super Secretary (Agent-based Architecture)")
     print("="*60 + "\n")
     
     # Determine what to process based on command line arguments
@@ -199,8 +199,8 @@ def main():
         input_path = "transcripts"
         print(f"No path specified. Using default folder: {input_path}")
         print("\nUsage:")
-        print("  Process folder:      python process_transcript.py path/to/folder")
-        print("  Process single file: python process_transcript.py path/to/file.docx\n")
+        print("  Process folder:      python super_secretary.py path/to/folder")
+        print("  Process single file: python super_secretary.py path/to/file.docx\n")
 
     if not os.path.isdir(input_path) and not os.path.isfile(input_path):
         print(f"Error: '{input_path}' is neither a file nor a directory!")

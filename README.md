@@ -1,6 +1,6 @@
-# Meeting Transcript Processor
+# Meeting Super Secretary
 
-An agent-based Python application that converts meeting transcripts (`.docx`) into structured meeting minutes using AWS Bedrock Claude. It supports single-file and batch folder processing, parallel execution, optional AWS SSO credential renewal, and summary quality evaluation.
+An agent-based Python application that converts meeting transcripts (`.docx`) into structured meeting minutes using AWS Bedrock Claude. It supports single-file and batch folder processing, parallel execution, automatic AWS SSO credential renewal, and summary quality evaluation.
 
 ## Requirements
 
@@ -30,9 +30,17 @@ pip install -r requirements.txt
 
 ### 3. Configure AWS credentials
 
-Recommended: use `go-aws-sso` or another AWS profile flow that writes credentials to `~/.aws/credentials`. In that case, `.env` is optional and can be omitted. The app verifies credentials with STS when processing starts and can run the configured SSO renewal command if credentials are missing or expired.
+Recommended: use the automatic AWS SSO flow. You do not need to run `go-aws-sso` manually before launching the processor.
 
-If you prefer `.env` credentials, copy `.env.example` to `.env` and fill in your credentials:
+When you run `python super_secretary.py`, the app first validates the input path, then initializes configuration and verifies AWS credentials with STS. If credentials are missing or expired, it automatically runs the configured renewal command:
+
+```bash
+go-aws-sso --persist
+```
+
+By default, credentials are reloaded from the selected AWS profile in `~/.aws/credentials` after `go-aws-sso` completes. Set `aws.profile` in `config.yaml` or `AWS_PROFILE` if you need a non-default profile; the app appends that profile to the SSO command when the command does not already include `--profile` or `-p`.
+
+Only create a `.env` file if you prefer to supply credentials directly. Do not copy `.env.example` unless you immediately replace the placeholder values; placeholder AWS keys will stop startup before the automatic SSO flow can run.
 
 ```bash
 cp .env.example .env
@@ -67,13 +75,13 @@ cp prompts.example.yaml prompts.yaml
 
 ```bash
 # Process all .docx files in the default transcripts/ folder
-python process_transcript.py
+python super_secretary.py
 
 # Process all .docx files in a specific folder
-python process_transcript.py path/to/folder
+python super_secretary.py path/to/folder
 
 # Process a single file
-python process_transcript.py path/to/transcript.docx
+python super_secretary.py path/to/transcript.docx
 ```
 
 Outputs are written to the `output/` folder:
@@ -158,7 +166,7 @@ When editing `quality_evaluation_prompt`, double literal JSON braces as `{{` and
 ## Architecture
 
 ```
-process_transcript.py          ← Entry point and CLI handling
+super_secretary.py             ← Entry point and CLI handling
 ├── TranscriptProcessorOrchestrator
 │   ├── CoordinatorAgent       ← Orchestrates pipeline, manages parallel execution
 │   │   ├── DocumentReaderAgent   ← Reads .docx transcript content
@@ -213,7 +221,7 @@ After each run the processor prints a summary including:
 
 ```
 .
-├── process_transcript.py       # Entry point
+├── super_secretary.py          # Entry point
 ├── config.py                   # Configuration and prompt management
 ├── config.yaml                 # Working application settings
 ├── prompts.yaml                # Working AI prompts and domain assignments
@@ -248,6 +256,6 @@ After each run the processor prints a summary including:
 | Symptom | What to check |
 |---|---|
 | `transcripts` folder not found | Create `transcripts/` or pass a file/folder path on the command line |
-| Missing or expired AWS credentials | Run `go-aws-sso --persist`, set `AWS_PROFILE`, or fill in `.env` |
+| Missing or expired AWS credentials | The app should launch `go-aws-sso --persist` automatically. Confirm `go-aws-sso` is installed, set `AWS_PROFILE` or `aws.profile` if needed, and remove placeholder `.env` values. |
 | Bedrock model errors | Confirm the configured model is available in `aws.region` and enabled for your AWS account |
 | Slow batch processing | Lower `parallel_processing.max_workers`, disable Claude quality evaluation, or set `batch_mode` to `sample` or `first` |
