@@ -46,7 +46,7 @@ import sys
 import glob
 from datetime import datetime
 
-from config import Configuration
+from config import Configuration, CredentialRefreshError
 from agents import CoordinatorAgent, OutputWriterAgent
 
 
@@ -87,9 +87,26 @@ class TranscriptProcessorOrchestrator:
         # Initialize metrics for single file
         self.coordinator.metrics_collector.start_batch()
         print("Progress: 0/1 files complete")
-        
-        result = self.coordinator.execute(file_path)
-        
+
+        try:
+            result = self.coordinator.execute(file_path)
+        except CredentialRefreshError as e:
+            print()
+            print("=" * 60)
+            print("AWS credentials cannot be refreshed.")
+            print(f"  {e}")
+            print("=" * 60)
+            return False
+        except Exception as e:
+            if self.config.is_expired_credentials_error(e):
+                print()
+                print("=" * 60)
+                print("AWS credentials expired and auto-refresh did not recover.")
+                print(f"  {e}")
+                print("=" * 60)
+                return False
+            raise
+
         if result:
             print("Progress: 1/1 files complete")
             # Display summary
@@ -213,6 +230,13 @@ def main():
     # immediately before real processing starts.
     try:
         orchestrator = TranscriptProcessorOrchestrator()
+    except CredentialRefreshError as e:
+        print()
+        print("=" * 60)
+        print("AWS credentials cannot be refreshed.")
+        print(f"  {e}")
+        print("=" * 60)
+        sys.exit(1)
     except Exception as e:
         print(f"Error: Failed to initialize processor: {e}")
         sys.exit(1)

@@ -5,7 +5,7 @@ Secretary Agent - AI agent that processes transcripts using Claude.
 from typing import Optional
 
 from agents.base_agent import BaseAgent
-from config import Configuration, PromptLibrary
+from config import Configuration, CredentialRefreshError, PromptLibrary
 
 
 class SecretaryAgent(BaseAgent):
@@ -53,7 +53,14 @@ class SecretaryAgent(BaseAgent):
             summary = response["output"]["message"]["content"][0]["text"]
             self.log("Successfully generated meeting minutes")
             return summary
-            
+
+        except CredentialRefreshError:
+            # SSO refresh has irrecoverably failed for this run — let the
+            # coordinator halt the batch instead of swallowing as per-file failure.
+            raise
         except Exception as e:
+            if self.config.is_expired_credentials_error(e):
+                # Auto-refresh did not recover; propagate so the coordinator halts.
+                raise
             self.log(f"Error during AI processing: {e}", "ERROR")
             return None

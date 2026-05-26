@@ -18,6 +18,11 @@ from pathlib import Path
 _AWS_CREDENTIAL_REFRESH_LOCK = threading.Lock()
 
 
+class CredentialRefreshError(RuntimeError):
+    """Raised when AWS SSO credential refresh fails non-recoverably for this run."""
+    pass
+
+
 class Configuration:
     """Central configuration management - loads from config.yaml and .env"""
     
@@ -31,6 +36,7 @@ class Configuration:
         # AWS Credentials (from environment variables only - never in config file)
         self._load_aws_credentials()
         self._credential_refresh_count = 0
+        self._credential_refresh_failed = False
         
         # Validate credential shape. Missing values are allowed here because
         # verify_aws_credentials can launch the configured SSO flow.
@@ -258,8 +264,18 @@ class Configuration:
         `go-aws-sso refresh` cannot recover when the cached SSO session itself
         is invalid. Override `aws.sso_renew_command` in config.yaml if your local
         flow differs.
+
+        Raises CredentialRefreshError if the renewal command fails or is missing.
+        Once a refresh has failed in this run, subsequent calls raise immediately
+        so parallel workers do not stampede a known-broken refresh.
         """
         with _AWS_CREDENTIAL_REFRESH_LOCK:
+            if self._credential_refresh_failed:
+                raise CredentialRefreshError(
+                    "AWS SSO refresh already failed in this run. "
+                    "Exit, run your SSO command manually, then re-launch the app."
+                )
+
             if (
                 refresh_count_at_error is not None
                 and self._credential_refresh_count > refresh_count_at_error
@@ -267,8 +283,28 @@ class Configuration:
                 return
 
             command = self._get_go_aws_sso_command()
-            print(f"Refreshing AWS credentials with: {' '.join(command)}")
-            subprocess.run(command, check=True)
+            print()
+            print("=" * 60)
+            print("AWS SSO session expired or missing.")
+            print(f"Running: {' '.join(command)}")
+            print("A browser window may open for SSO authentication.")
+            print("The app is waiting — complete authorization to continue.")
+            print("=" * 60)
+
+            try:
+                subprocess.run(command, check=True)
+            except FileNotFoundError as e:
+                self._credential_refresh_failed = True
+                raise CredentialRefreshError(
+                    f"SSO refresh command '{command[0]}' not found on PATH. "
+                    f"Install it, or set aws.sso_renew_command in config.yaml."
+                ) from e
+            except subprocess.CalledProcessError as e:
+                self._credential_refresh_failed = True
+                raise CredentialRefreshError(
+                    f"SSO refresh exited with code {e.returncode}. "
+                    f"Was browser authorization cancelled? Re-launch the app to retry."
+                ) from e
 
             # go-aws-sso normally writes ~/.aws/credentials; reloading .env first
             # also supports teams that sync fresh credentials there.
@@ -282,9 +318,15 @@ class Configuration:
 
             self._validate_credentials()
             self._credential_refresh_count += 1
+            print("✓ AWS credentials refreshed.")
+            print()
 
     def verify_aws_credentials(self):
-        """Verify current AWS credentials, renewing once if they are expired."""
+        """Verify current AWS credentials, renewing once if they are expired.
+
+        Probes both STS and Bedrock so a credentials gap is caught at startup
+        rather than masquerading as per-file processing failures during batch.
+        """
         try:
             identity = self._create_aws_client("sts").get_caller_identity()
         except Exception as e:
@@ -292,10 +334,6 @@ class Configuration:
             if not missing and not self.is_expired_credentials_error(e):
                 raise
 
-            if missing:
-                print("AWS credentials are missing. Launching go-aws-sso to obtain them...")
-            else:
-                print("AWS credentials appear to be expired. Launching go-aws-sso to renew them...")
             self.refresh_aws_credentials(self._credential_refresh_count)
             identity = self._create_aws_client("sts").get_caller_identity()
 
@@ -303,30 +341,90 @@ class Configuration:
         arn = identity.get("Arn", "unknown")
         print(f"✓ AWS credentials verified for account {account}")
         print(f"  Identity: {arn}")
+
+        # Bedrock probe — boto3's default chain can mask staleness at STS while
+        # the snapshot we hand to the Bedrock client is rejected. Probing here
+        # surfaces the gap before batch processing starts.
+        self._probe_bedrock_access()
         return identity
+
+    def _probe_bedrock_access(self):
+        """Verify Bedrock accepts current credentials; refresh once if not."""
+        def _call_probe():
+            self._create_aws_client("bedrock").list_foundation_models()
+
+        try:
+            _call_probe()
+        except Exception as e:
+            if self.is_expired_credentials_error(e):
+                self.refresh_aws_credentials(self._credential_refresh_count)
+                try:
+                    _call_probe()
+                except Exception as retry_e:
+                    if self.is_expired_credentials_error(retry_e):
+                        raise CredentialRefreshError(
+                            "Bedrock still rejects credentials after SSO refresh. "
+                            "Verify your AWS profile has bedrock access in this region."
+                        ) from retry_e
+                    # Non-credential error (e.g., AccessDenied on ListFoundationModels)
+                    # is acceptable — InvokeModel permission may still be granted.
+                    print(f"  Note: Bedrock probe non-blocking error: {retry_e}")
+                    return
+                print("✓ Bedrock access verified.")
+            else:
+                # AccessDenied on ListFoundationModels is OK — user may only have
+                # InvokeModel. Surface as a note rather than failing startup.
+                print(f"  Note: Bedrock probe non-blocking error: {e}")
+                return
+        else:
+            print("✓ Bedrock access verified.")
 
     @staticmethod
     def is_expired_credentials_error(error: Exception) -> bool:
-        """Return True when an AWS error indicates expired temporary credentials."""
+        """Return True when an AWS error indicates expired/invalid credentials."""
         expired_codes = {
             "ExpiredToken",
             "ExpiredTokenException",
             "RequestExpired",
         }
-        possible_expired_codes = {"UnauthorizedException", "UnrecognizedClientException"}
+        # These codes are ambiguous on their own — they only count as
+        # expired-credentials when paired with a token-expired message marker.
+        possible_expired_codes = {
+            "UnauthorizedException",
+            "UnrecognizedClientException",
+            "InvalidSignatureException",
+            "InvalidClientTokenId",
+            "AccessDeniedException",
+            "ValidationException",
+        }
+        # botocore SSO exception class names (not ClientError subclasses)
+        sso_error_names = {
+            "UnauthorizedSSOTokenError",
+            "SSOTokenLoadError",
+            "TokenRetrievalError",
+        }
         expired_markers = (
             "expired token",
             "token has expired",
+            "token is expired",
             "security token included in the request is expired",
-            "the security token included in the request is expired",
+            "security token included in the request is invalid",
+            "invalid security token",
             "expired credentials",
             "credentials have expired",
+            "session token has expired",
+            "signature has expired",
+            "sso session associated with this profile has expired",
+            "sso session has expired",
         )
 
         current = error
         seen = set()
         while current and id(current) not in seen:
             seen.add(id(current))
+
+            if type(current).__name__ in sso_error_names:
+                return True
 
             if isinstance(current, ClientError):
                 aws_error = current.response.get("Error", {})
@@ -348,7 +446,12 @@ class Configuration:
         return False
 
     def converse_with_auto_refresh(self, client, **kwargs):
-        """Call Bedrock Converse, renewing expired SSO credentials once if needed."""
+        """Call Bedrock Converse, renewing expired SSO credentials once if needed.
+
+        Propagates CredentialRefreshError if refresh has irrecoverably failed —
+        the caller should let this propagate so the batch can halt cleanly
+        instead of every file logging an opaque per-file error.
+        """
         client_refresh_count = getattr(
             client,
             "_secretary_credential_refresh_count",
@@ -361,7 +464,6 @@ class Configuration:
                 raise
 
             if client_refresh_count >= self._credential_refresh_count:
-                print("AWS credentials appear to be expired. Launching go-aws-sso to renew them...")
                 self.refresh_aws_credentials(client_refresh_count)
             refreshed_client = self.create_bedrock_client()
             return refreshed_client.converse(**kwargs), refreshed_client

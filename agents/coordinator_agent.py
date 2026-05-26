@@ -15,7 +15,7 @@ from agents.secretary_agent import SecretaryAgent
 from agents.output_writer_agent import OutputWriterAgent
 from agents.quality_evaluator import QualityEvaluator
 from agents.metrics import MetricsCollector, TranscriptMetrics
-from config import Configuration
+from config import Configuration, CredentialRefreshError
 
 
 class CoordinatorAgent(BaseAgent):
@@ -170,19 +170,24 @@ class CoordinatorAgent(BaseAgent):
             print("="*60)
             
             results = []
+            halt_reason: Optional[str] = None
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
                 future_to_file = {
-                    executor.submit(self._process_file_safe, file_path): file_path 
+                    executor.submit(self._process_file_safe, file_path): file_path
                     for file_path in file_paths
                 }
-                
+
                 # Process completed tasks as they finish
                 completed = 0
                 for future in as_completed(future_to_file):
                     file_path = future_to_file[future]
                     completed += 1
-                    
+
+                    if halt_reason:
+                        future.cancel()
+                        continue
+
                     try:
                         result = future.result()
                         if result:
@@ -194,16 +199,49 @@ class CoordinatorAgent(BaseAgent):
                             with self.print_lock:
                                 print(f"[{completed}/{len(file_paths)}] ✗ Failed: {os.path.basename(file_path)}")
                                 print(f"Progress: {completed}/{len(file_paths)} files complete")
+                    except CredentialRefreshError as e:
+                        halt_reason = str(e)
+                        with self.print_lock:
+                            print()
+                            print("=" * 60)
+                            print(f"Batch halted: AWS credentials cannot be refreshed.")
+                            print(f"  {halt_reason}")
+                            print("=" * 60)
+                            print()
+                        # Cancel any not-yet-started futures
+                        for pending in future_to_file:
+                            pending.cancel()
                     except Exception as e:
+                        if self.config.is_expired_credentials_error(e):
+                            halt_reason = (
+                                "AWS credentials expired during processing and "
+                                "auto-refresh did not recover."
+                            )
+                            with self.print_lock:
+                                print()
+                                print("=" * 60)
+                                print(f"Batch halted: {halt_reason}")
+                                print(f"  Underlying error: {e}")
+                                print("=" * 60)
+                                print()
+                            for pending in future_to_file:
+                                pending.cancel()
+                            continue
                         with self.print_lock:
                             print(f"[{completed}/{len(file_paths)}] ✗ Error processing {os.path.basename(file_path)}: {str(e)}")
                             print(f"Progress: {completed}/{len(file_paths)} files complete")
-                    
+
                     with self.print_lock:
                         print()  # Blank line between status updates
-            
+
             print("="*60)
-            self.log(f"Batch complete: {len(results)}/{len(file_paths)} files processed successfully")
+            if halt_reason:
+                self.log(
+                    f"Batch halted after {len(results)}/{len(file_paths)} files: {halt_reason}",
+                    "ERROR",
+                )
+            else:
+                self.log(f"Batch complete: {len(results)}/{len(file_paths)} files processed successfully")
         
         # End metrics collection and print summary
         self.metrics_collector.end_batch()
@@ -223,18 +261,50 @@ class CoordinatorAgent(BaseAgent):
             List of result dictionaries
         """
         print("="*60)
-        
+
         results = []
+        halt_reason: Optional[str] = None
         for index, file_path in enumerate(file_paths, start=1):
-            result = self.execute(file_path)
+            try:
+                result = self.execute(file_path)
+            except CredentialRefreshError as e:
+                halt_reason = str(e)
+                print()
+                print("=" * 60)
+                print("Batch halted: AWS credentials cannot be refreshed.")
+                print(f"  {halt_reason}")
+                print("=" * 60)
+                print()
+                break
+            except Exception as e:
+                if self.config.is_expired_credentials_error(e):
+                    halt_reason = (
+                        "AWS credentials expired during processing and "
+                        "auto-refresh did not recover."
+                    )
+                    print()
+                    print("=" * 60)
+                    print(f"Batch halted: {halt_reason}")
+                    print(f"  Underlying error: {e}")
+                    print("=" * 60)
+                    print()
+                    break
+                raise
+
             if result:
                 results.append(result)
             print(f"Progress: {index}/{len(file_paths)} files complete")
             print()  # Blank line between files
-        
+
         print("="*60)
-        self.log(f"Batch complete: {len(results)}/{len(file_paths)} files processed successfully")
-        
+        if halt_reason:
+            self.log(
+                f"Batch halted after {len(results)}/{len(file_paths)} files: {halt_reason}",
+                "ERROR",
+            )
+        else:
+            self.log(f"Batch complete: {len(results)}/{len(file_paths)} files processed successfully")
+
         return results
     
     def _process_file_safe(self, file_path: str) -> Optional[Dict[str, str]]:
@@ -343,11 +413,18 @@ class CoordinatorAgent(BaseAgent):
             
             return result
             
+        except CredentialRefreshError:
+            # Propagate so the batch can halt cleanly rather than logging
+            # an opaque per-file failure for every remaining worker.
+            raise
         except Exception as e:
+            if self.config.is_expired_credentials_error(e):
+                # Auth failure auto-refresh could not recover from — halt batch.
+                raise
             error_message = str(e)
             with self.print_lock:
                 self.log(f"Exception processing {file_path}: {error_message}", "ERROR")
-            
+
             # Record failed metric
             processing_time = time.time() - start_time
             metric = TranscriptMetrics(
